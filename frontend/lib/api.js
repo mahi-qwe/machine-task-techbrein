@@ -15,6 +15,31 @@ export function clearToken() {
   window.localStorage.removeItem("token");
 }
 
+export function getSession() {
+  const token = getToken();
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) {
+      return null;
+    }
+
+    const normalizedPayload = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const decodedPayload = JSON.parse(window.atob(normalizedPayload));
+
+    return {
+      userId: decodedPayload.user_id,
+      email: decodedPayload.email,
+      role: decodedPayload.role,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function apiRequest(path, options = {}) {
   const token = getToken();
   const headers = {

@@ -5,17 +5,19 @@ import { useRouter } from "next/navigation";
 import CreateProjectPanel from "../../components/CreateProjectPanel";
 import CreateTaskModal from "../../components/CreateTaskModal";
 import CreateUserPanel from "../../components/CreateUserPanel";
-import { apiRequest, clearToken, getToken } from "../../lib/api";
+import { apiRequest, clearToken, getSession, getToken } from "../../lib/api";
 
 export default function DashboardPage() {
   const router = useRouter();
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
+  const [session, setSession] = useState(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [assigningTaskId, setAssigningTaskId] = useState(null);
+  const [updatingStatusTaskId, setUpdatingStatusTaskId] = useState(null);
   const [error, setError] = useState("");
 
   const usersById = useMemo(() => {
@@ -57,11 +59,19 @@ export default function DashboardPage() {
       router.push("/");
       return;
     }
+    setSession(getSession());
     loadData();
   }, []);
 
+  const isAdmin = session?.role === "admin";
+
+  function canUpdateTaskStatus(task) {
+    if (isAdmin) return true;
+    return Boolean(session?.userId && task.assigned_to === session.userId);
+  }
+
   async function handleAssignTask(taskId, assignedTo) {
-    if (!assignedTo) return;
+    if (!assignedTo || !isAdmin) return;
 
     try {
       setAssigningTaskId(taskId);
@@ -87,6 +97,31 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleStatusChange(taskId, status) {
+    try {
+      setUpdatingStatusTaskId(taskId);
+      const updatedTask = await apiRequest(`/tasks/${taskId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      setTasks((currentTasks) =>
+        currentTasks.map((task) =>
+          task.id === taskId
+            ? {
+                ...task,
+                status: updatedTask.status,
+              }
+            : task
+        )
+      );
+      setError("");
+    } catch (err) {
+      setError(err.message || "Failed to update task status");
+    } finally {
+      setUpdatingStatusTaskId(null);
+    }
+  }
+
   return (
     <main className="dashboard-shell">
       <header className="hero">
@@ -94,9 +129,10 @@ export default function DashboardPage() {
           <p className="eyebrow">Internal Workspace</p>
           <h1>Projects and Tasks</h1>
           <p className="muted">A minimal client for login, project browsing, task filtering, and quick task creation.</p>
+          <p className="muted role-line">Signed in as {session?.role || "user"}</p>
         </div>
         <div className="hero-actions">
-          <button onClick={() => setShowCreateTask(true)}>Create Task</button>
+          {isAdmin ? <button onClick={() => setShowCreateTask(true)}>Create Task</button> : null}
           <button
             className="ghost"
             onClick={() => {
@@ -111,8 +147,8 @@ export default function DashboardPage() {
 
       {error ? <p className="error-banner">{error}</p> : null}
 
-      <CreateUserPanel onCreated={loadData} />
-      <CreateProjectPanel onCreated={loadData} />
+      {isAdmin ? <CreateUserPanel onCreated={loadData} /> : null}
+      {isAdmin ? <CreateProjectPanel onCreated={loadData} /> : null}
 
       <section className="panel">
         <div className="panel-header">
@@ -166,36 +202,54 @@ export default function DashboardPage() {
                   : "Unassigned"}
               </small>
               <small>Due: {task.due_date ? new Date(task.due_date).toLocaleDateString() : "Not set"}</small>
-              <label className="assign-control">
-                Assign user
-                <select
-                  value={task.assigned_to || ""}
-                  onChange={(event) => handleAssignTask(task.id, event.target.value)}
-                  disabled={assigningTaskId === task.id}
-                >
-                  <option value="">Select user</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.name} ({user.role})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {canUpdateTaskStatus(task) ? (
+                <label className="assign-control">
+                  Update status
+                  <select
+                    value={task.status}
+                    onChange={(event) => handleStatusChange(task.id, event.target.value)}
+                    disabled={updatingStatusTaskId === task.id}
+                  >
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="done">Done</option>
+                  </select>
+                </label>
+              ) : null}
+              {isAdmin ? (
+                <label className="assign-control">
+                  Assign user
+                  <select
+                    value={task.assigned_to || ""}
+                    onChange={(event) => handleAssignTask(task.id, event.target.value)}
+                    disabled={assigningTaskId === task.id}
+                  >
+                    <option value="">Select user</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name} ({user.role})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </article>
           ))}
         </div>
       </section>
 
-      <CreateTaskModal
-        open={showCreateTask}
-        onClose={() => setShowCreateTask(false)}
-        projects={projects}
-        users={users}
-        onCreated={async () => {
-          await loadData();
-          setShowCreateTask(false);
-        }}
-      />
+      {isAdmin ? (
+        <CreateTaskModal
+          open={showCreateTask}
+          onClose={() => setShowCreateTask(false)}
+          projects={projects}
+          users={users}
+          onCreated={async () => {
+            await loadData();
+            setShowCreateTask(false);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

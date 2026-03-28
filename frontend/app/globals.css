@@ -110,6 +110,10 @@ small {
   color: var(--muted);
 }
 
+.role-line {
+  margin: 0.35rem 0 0;
+}
+
 .panel {
   border-radius: 24px;
   padding: 1.4rem;
